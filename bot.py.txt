@@ -1,0 +1,103 @@
+import os
+import discord
+from discord.ext import commands
+from aiohttp import web
+
+intents = discord.Intents.default()
+intents.members = True
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# ============ ЗАМЕНИ НА СВОИ ЗНАЧЕНИЯ ============
+VERIFICATION_CHANNEL_ID = 0            # ID канала верификации
+ROLE_ID_1 = 111111111111111111         # ID первой роли (кнопка 1)
+ROLE_ID_2 = 222222222222222222         # ID второй роли (кнопка 2)
+# ================================================
+
+
+class RoleButtons(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def give_role(self, interaction: discord.Interaction, role_id: int):
+        role = interaction.guild.get_role(role_id)
+        if role is None:
+            return await interaction.response.send_message(
+                "Ошибка: роль не найдена.", ephemeral=True
+            )
+        if role in interaction.user.roles:
+            await interaction.user.remove_roles(role)
+            await interaction.response.send_message(
+                f"Роль {role.mention} снята.", ephemeral=True
+            )
+        else:
+            await interaction.user.add_roles(role)
+            await interaction.response.send_message(
+                f"Роль {role.mention} выдана! Теперь у вас есть доступ к серверу.",
+                ephemeral=True,
+            )
+
+    @discord.ui.button(label="Участник", style=discord.ButtonStyle.green,
+                       custom_id="role_btn:1")
+    async def btn1(self, interaction: discord.Interaction,
+                   button: discord.ui.Button):
+        await self.give_role(interaction, ROLE_ID_1)
+
+    @discord.ui.button(label="Гость", style=discord.ButtonStyle.blurple,
+                       custom_id="role_btn:2")
+    async def btn2(self, interaction: discord.Interaction,
+                   button: discord.ui.Button):
+        await self.give_role(interaction, ROLE_ID_2)
+
+
+@bot.event
+async def on_ready():
+    bot.add_view(RoleButtons())
+    print(f"Бот запущен как {bot.user}")
+
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    channel = member.guild.get_channel(VERIFICATION_CHANNEL_ID)
+    if channel:
+        await channel.send(
+            f"Привет, {member.mention}! Выбери роль кнопкой ниже, "
+            "чтобы получить доступ к серверу.",
+            view=RoleButtons(),
+        )
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def panel(ctx: commands.Context):
+    await ctx.send(
+        "**Добро пожаловать!**\n"
+        "Нажми кнопку с нужной ролью, чтобы открыть доступ к серверу.",
+        view=RoleButtons(),
+    )
+    await ctx.message.delete()
+
+
+# --- Пинг-сервер, чтобы Render не усыплял бота ---
+async def health(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get("/", health)
+runner = web.AppRunner(app)
+
+
+async def start_health():
+    port = int(os.environ.get("PORT", 10000))
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+
+@bot.event
+async def setup_hook():
+    await start_health()
+
+
+bot.run(os.environ["DISCORD_TOKEN"])
